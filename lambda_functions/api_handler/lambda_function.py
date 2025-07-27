@@ -8,6 +8,7 @@ from datetime import datetime
 import pytz
 import urllib.request
 import urllib.parse
+import gzip
 from shared.dynamodb_client import DynamoDBClient
 
 
@@ -17,15 +18,10 @@ def lambda_handler(event, context):
     """
     
     try:
-        # Debug logging
-        print(f"Event received: {json.dumps(event)}")
-        
         # Parse the request (Function URL format)
         http_method = event.get('requestContext', {}).get('http', {}).get('method', '')
         raw_path = event.get('rawPath', '')
         query_params = event.get('queryStringParameters') or {}
-        
-        print(f"Parsed - Method: {http_method}, Path: {raw_path}")
         
         # Parse body if present
         body = {}
@@ -56,7 +52,6 @@ def lambda_handler(event, context):
             return create_response(404, {'error': 'Endpoint not found'})
             
     except Exception as e:
-        print(f"Error in API handler: {str(e)}")
         return create_response(500, {'error': f'Internal server error: {str(e)}'})
 
 def create_response(status_code, body, headers=None):
@@ -231,8 +226,9 @@ def exchange_discord_token(body):
         # Get Discord client credentials from environment
         client_id = os.environ.get('DISCORD_CLIENT_ID')
         client_secret = os.environ.get('DISCORD_CLIENT_SECRET')
+        redirect_uri = os.environ.get('DISCORD_REDIRECT_URI')
         
-        if not client_id or not client_secret:
+        if not client_id or not client_secret or not redirect_uri:
             return create_response(500, {'error': 'Discord credentials not configured'})
         
         # Exchange code for token with Discord
@@ -240,7 +236,8 @@ def exchange_discord_token(body):
             'client_id': client_id,
             'client_secret': client_secret,
             'grant_type': 'authorization_code',
-            'code': body['code']
+            'code': body['code'],
+            'redirect_uri': redirect_uri
         }
         
         # Make request to Discord token endpoint
@@ -248,26 +245,62 @@ def exchange_discord_token(body):
         req = urllib.request.Request(
             'https://discord.com/api/oauth2/token',
             data=req_data,
-            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            headers={
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': 'WordWebs-Discord-Activity/1.0 (https://wordwebs.onrender.com)',
+                'Accept': 'application/json',
+                'Accept-Encoding': 'gzip, deflate'
+            }
         )
         
-        with urllib.request.urlopen(req) as response:
-            if response.status != 200:
-                return create_response(400, {'error': 'Failed to exchange code for token'})
-            
-            token_response = json.loads(response.read().decode('utf-8'))
+        try:
+            with urllib.request.urlopen(req) as response:
+                if response.status != 200:
+                    error_body = response.read()
+                    # Handle gzip encoding
+                    if response.headers.get('Content-Encoding') == 'gzip':
+                        error_body = gzip.decompress(error_body)
+                    error_text = error_body.decode('utf-8')
+                    return create_response(400, {'error': f'Discord API error {response.status}: {error_text}'})
+                
+                response_body = response.read()
+                # Handle gzip encoding
+                if response.headers.get('Content-Encoding') == 'gzip':
+                    response_body = gzip.decompress(response_body)
+                token_response = json.loads(response_body.decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode('utf-8') if hasattr(e, 'read') else str(e)
+            return create_response(500, {'error': f'Discord API HTTP Error {e.code}: {error_body}'})
+        except Exception as e:
+            return create_response(500, {'error': f'Request failed: {str(e)}'})
         
         # Get user info with the access token
         user_req = urllib.request.Request(
             'https://discord.com/api/users/@me',
-            headers={'Authorization': f'Bearer {token_response["access_token"]}'}
+            headers={
+                'Authorization': f'Bearer {token_response["access_token"]}',
+                'User-Agent': 'WordWebs-Discord-Activity/1.0 (https://wordwebs.onrender.com)',
+                'Accept': 'application/json'
+            }
         )
         
-        with urllib.request.urlopen(user_req) as user_response:
-            if user_response.status != 200:
-                return create_response(400, {'error': 'Failed to get user info'})
-            
-            user_data = json.loads(user_response.read().decode('utf-8'))
+        try:
+            with urllib.request.urlopen(user_req) as user_response:
+                if user_response.status != 200:
+                    error_body = user_response.read()
+                    # Handle gzip encoding
+                    if user_response.headers.get('Content-Encoding') == 'gzip':
+                        error_body = gzip.decompress(error_body)
+                    error_text = error_body.decode('utf-8')
+                    return create_response(400, {'error': f'Failed to get user info: {error_text}'})
+                
+                user_body = user_response.read()
+                # Handle gzip encoding
+                if user_response.headers.get('Content-Encoding') == 'gzip':
+                    user_body = gzip.decompress(user_body)
+                user_data = json.loads(user_body.decode('utf-8'))
+        except Exception as e:
+            return create_response(500, {'error': f'Failed to get user info: {str(e)}'})
         
         # Return token and user info
         return create_response(200, {
@@ -282,7 +315,6 @@ def exchange_discord_token(body):
         })
         
     except Exception as e:
-        print(f"Error exchanging Discord token: {str(e)}")
         return create_response(500, {'error': f'Failed to exchange token: {str(e)}'})
 
 def refresh_discord_token(body):

@@ -6,6 +6,7 @@ Serverless backend for the WordWebs Discord Activity using AWS Lambda, DynamoDB,
 
 - AWS Account created
 - Gemini API key obtained from [Google AI Studio](https://aistudio.google.com/app/apikey)
+- Discord Developer Application created at [Discord Developer Portal](https://discord.com/developers/applications)
 - Python 3.11+ installed
 
 ## Quick Setup Guide
@@ -29,9 +30,19 @@ Test with: `aws sts get-caller-identity`
 # Copy the example file
 copy .env.example .env
 
-# Edit .env and add your Gemini API key:
+# Edit .env and add your credentials:
 GEMINI_API_KEY=your-actual-gemini-api-key-here
+DISCORD_CLIENT_ID=your-discord-client-id
+DISCORD_CLIENT_SECRET=your-discord-client-secret
+DISCORD_REDIRECT_URI=https://your-production-url.com
 ```
+
+**Get Discord Credentials:**
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Create a new application or select existing one
+3. Copy the **Client ID** from General Information
+4. Go to OAuth2 section and copy the **Client Secret**
+5. Set redirect URI to your production frontend URL
 
 ### 3. Deploy Everything to AWS
 ```bash
@@ -128,6 +139,11 @@ quick_deploy.bat            # Windows shortcut
 ```bash
 # Gemini AI Configuration
 GEMINI_API_KEY=your-gemini-api-key-here
+
+# Discord Configuration
+DISCORD_CLIENT_ID=your-discord-client-id
+DISCORD_CLIENT_SECRET=your-discord-client-secret
+DISCORD_REDIRECT_URI=https://your-production-url.com
 ```
 
 **Security Note:** Never commit `.env` to git! It's already in `.gitignore`.
@@ -137,9 +153,12 @@ GEMINI_API_KEY=your-gemini-api-key-here
 Your Lambda Function URL provides these endpoints:
 
 - `GET /daily-puzzle` - Get today's puzzle
-- `POST /submit-guess` - Submit player guess
+- `POST /submit-guess` - Submit player guess (requires Discord auth)
 - `GET /leaderboard?date=YYYY-MM-DD` - Get leaderboard
-- `GET /player-stats?discord_id=ID` - Get player stats
+- `GET /player-stats?discord_id=ID` - Get player stats (requires Discord auth)
+- `POST /discord-oauth/token` - Exchange Discord auth code for access token
+- `POST /discord-oauth/refresh` - Refresh Discord access token
+- `GET /discord-oauth/verify` - Verify Discord access token
 
 Example: `https://your-function-url.lambda-url.us-east-1.on.aws/daily-puzzle`
 

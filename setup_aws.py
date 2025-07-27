@@ -264,7 +264,7 @@ def load_env_vars():
                 key, value = line.split('=', 1)
                 env_vars[key.strip()] = value.strip()
     
-    required_vars = ['GEMINI_API_KEY', 'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET']
+    required_vars = ['GEMINI_API_KEY', 'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI']
     missing_vars = [var for var in required_vars if not env_vars.get(var)]
     
     if missing_vars:
@@ -311,7 +311,8 @@ def main():
     
     api_env = {
         "DISCORD_CLIENT_ID": env_vars["DISCORD_CLIENT_ID"],
-        "DISCORD_CLIENT_SECRET": env_vars["DISCORD_CLIENT_SECRET"]
+        "DISCORD_CLIENT_SECRET": env_vars["DISCORD_CLIENT_SECRET"],
+        "DISCORD_REDIRECT_URI": env_vars["DISCORD_REDIRECT_URI"]
     }
     
     daily_result = create_lambda_function(
