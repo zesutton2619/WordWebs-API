@@ -1,0 +1,193 @@
+{
+  "tables": [
+    {
+      "TableName": "wordwebs-daily-puzzles",
+      "KeySchema": [
+        {
+          "AttributeName": "puzzle_date",
+          "KeyType": "HASH"
+        }
+      ],
+      "AttributeDefinitions": [
+        {
+          "AttributeName": "puzzle_date",
+          "AttributeType": "S"
+        }
+      ],
+      "BillingMode": "PAY_PER_REQUEST",
+      "GlobalSecondaryIndexes": [],
+      "LocalSecondaryIndexes": [],
+      "Description": "Daily puzzles with words and groups",
+      "ExampleItem": {
+        "puzzle_date": "2025-01-26",
+        "puzzle_id": "uuid-string",
+        "words": ["WORD1", "WORD2", "WORD3", "...16 words total"],
+        "groups": [
+          {
+            "words": ["WORD1", "WORD2", "WORD3", "WORD4"],
+            "category": "CATEGORY NAME",
+            "difficulty": 1
+          }
+        ],
+        "created_at": "2025-01-26T05:00:00Z"
+      }
+    },
+    {
+      "TableName": "wordwebs-players",
+      "KeySchema": [
+        {
+          "AttributeName": "discord_id",
+          "KeyType": "HASH"
+        }
+      ],
+      "AttributeDefinitions": [
+        {
+          "AttributeName": "discord_id",
+          "AttributeType": "S"
+        }
+      ],
+      "BillingMode": "PAY_PER_REQUEST",
+      "GlobalSecondaryIndexes": [],
+      "LocalSecondaryIndexes": [],
+      "Description": "Discord player information",
+      "ExampleItem": {
+        "discord_id": "123456789012345678",
+        "display_name": "PlayerName",
+        "total_games": 5,
+        "games_won": 3,
+        "best_time": 120,
+        "created_at": "2025-01-26T12:00:00Z",
+        "last_played": "2025-01-26T12:00:00Z"
+      }
+    },
+    {
+      "TableName": "wordwebs-game-sessions",
+      "KeySchema": [
+        {
+          "AttributeName": "session_id",
+          "KeyType": "HASH"
+        }
+      ],
+      "AttributeDefinitions": [
+        {
+          "AttributeName": "session_id",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "puzzle_date",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "completion_time",
+          "AttributeType": "N"
+        }
+      ],
+      "BillingMode": "PAY_PER_REQUEST",
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "puzzle-date-time-index",
+          "KeySchema": [
+            {
+              "AttributeName": "puzzle_date",
+              "KeyType": "HASH"
+            },
+            {
+              "AttributeName": "completion_time",
+              "KeyType": "RANGE"
+            }
+          ],
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        }
+      ],
+      "LocalSecondaryIndexes": [],
+      "Description": "Individual game sessions and leaderboard data",
+      "ExampleItem": {
+        "session_id": "uuid-string",
+        "discord_id": "123456789012345678",
+        "display_name": "PlayerName",
+        "puzzle_date": "2025-01-26",
+        "puzzle_id": "uuid-string",
+        "guesses": [
+          ["WORD1", "WORD2", "WORD3", "WORD4"],
+          ["WORD5", "WORD6", "WORD7", "WORD8"]
+        ],
+        "completed": true,
+        "completion_time": 120,
+        "created_at": "2025-01-26T12:00:00Z"
+      }
+    },
+    {
+      "TableName": "wordwebs-historical-puzzles",
+      "KeySchema": [
+        {
+          "AttributeName": "group_hash",
+          "KeyType": "HASH"
+        }
+      ],
+      "AttributeDefinitions": [
+        {
+          "AttributeName": "group_hash",
+          "AttributeType": "S"
+        }
+      ],
+      "BillingMode": "PAY_PER_REQUEST",
+      "GlobalSecondaryIndexes": [],
+      "LocalSecondaryIndexes": [],
+      "Description": "Historical puzzle groups to prevent duplicates",
+      "ExampleItem": {
+        "group_hash": "md5-hash-of-sorted-words",
+        "words": ["WORD1", "WORD2", "WORD3", "WORD4"],
+        "category": "CATEGORY NAME",
+        "difficulty": 1,
+        "created_at": "2025-01-26T05:00:00Z"
+      }
+    },
+    {
+      "TableName": "wordwebs-theme-suggestions",
+      "KeySchema": [
+        {
+          "AttributeName": "theme_id",
+          "KeyType": "HASH"
+        }
+      ],
+      "AttributeDefinitions": [
+        {
+          "AttributeName": "theme_id",
+          "AttributeType": "S"
+        },
+        {
+          "AttributeName": "status",
+          "AttributeType": "S"
+        }
+      ],
+      "BillingMode": "PAY_PER_REQUEST",
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexName": "status-index",
+          "KeySchema": [
+            {
+              "AttributeName": "status",
+              "KeyType": "HASH"
+            }
+          ],
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        }
+      ],
+      "LocalSecondaryIndexes": [],
+      "Description": "Future feature: Theme suggestions and votes",
+      "ExampleItem": {
+        "theme_id": "uuid-string",
+        "discord_id": "123456789012345678",
+        "theme_name": "Movies",
+        "description": "Categories related to films and cinema",
+        "status": "pending",
+        "votes": 5,
+        "created_at": "2025-01-26T12:00:00Z"
+      }
+    }
+  ]
+}
