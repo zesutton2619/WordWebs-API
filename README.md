@@ -12,20 +12,24 @@ Serverless backend for the WordWebs Discord Activity using AWS Lambda, DynamoDB,
 ## Quick Setup Guide
 
 ### 1. Install AWS CLI and Configure Credentials
+
 ```bash
 # Download and install AWS CLI from: https://aws.amazon.com/cli/
 # After installation, configure your credentials:
 aws configure
 ```
+
 You'll need:
+
 - AWS Access Key ID
-- AWS Secret Access Key  
+- AWS Secret Access Key
 - Default region (recommend: us-east-1)
 - Default output format: json
 
 Test with: `aws sts get-caller-identity`
 
 ### 2. Set Up Environment Variables
+
 ```bash
 # Copy the example file
 copy .env.example .env
@@ -35,9 +39,11 @@ GEMINI_API_KEY=your-actual-gemini-api-key-here
 DISCORD_CLIENT_ID=your-discord-client-id
 DISCORD_CLIENT_SECRET=your-discord-client-secret
 DISCORD_REDIRECT_URI=https://your-production-url.com
+DISCORD_BOT_TOKEN=your-discord-bot-token
 ```
 
 **Get Discord Credentials:**
+
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Create a new application or select existing one
 3. Copy the **Client ID** from General Information
@@ -45,23 +51,28 @@ DISCORD_REDIRECT_URI=https://your-production-url.com
 5. Set redirect URI to your production frontend URL
 
 ### 3. Deploy Everything to AWS
+
 ```bash
 # This creates DynamoDB tables, Lambda functions, and Function URLs
 python setup_aws.py
 ```
 
 ### 4. Get Your API URL
+
 The setup script will show your Function URL:
+
 ```
 API URL: https://abc123xyz.lambda-url.us-east-1.on.aws/
 ```
 
 ### 5. Test Your Deployment
+
 - Test the API URL in browser: `https://your-url.lambda-url.us-east-1.on.aws/`
 - Should see: `{"message": "WordWebs API is running"}`
 - Test daily puzzle endpoint: `https://your-url.lambda-url.us-east-1.on.aws/daily-puzzle`
 
 ### 6. Update Your Frontend
+
 Use the Function URL in your Discord Activity frontend code.
 
 ## Daily Development
@@ -73,11 +84,13 @@ python deploy.py
 # Deploy specific function
 python deploy.py daily_puzzle_generator
 python deploy.py api_handler
+python deploy.py daily_summary_sender
 ```
 
 ## Troubleshooting
 
 If something fails:
+
 - Check AWS credentials: `aws sts get-caller-identity`
 - Verify Gemini API key in .env file
 - Check Python version: `python --version` (should be 3.11+)
@@ -86,10 +99,11 @@ If something fails:
 ## AWS Resources Created
 
 After successful deployment, you'll have:
-- 5 DynamoDB tables (wordwebs-*)
-- 2 Lambda functions
+
+- 6 DynamoDB tables (wordwebs-\*)
+- 3 Lambda functions (api_handler, daily_puzzle_generator, daily_summary_sender)
 - 1 Lambda Function URL (your API endpoint)
-- 1 EventBridge rule (daily puzzle generation at midnight EST)
+- 2 EventBridge rules (daily puzzle generation at midnight EST, daily summary at 12:05 AM EST)
 - 1 IAM role (Lambda execution)
 
 Everything stays within AWS Always Free Tier limits!
@@ -107,6 +121,7 @@ DynamoDB Tables
 ```
 
 **Always Free Components:**
+
 - **Lambda**: 1M requests + 400,000 GB-seconds/month
 - **DynamoDB**: 25 GB storage + 200M requests/month
 - **Lambda Function URLs**: FREE (included with Lambda)
@@ -116,13 +131,16 @@ DynamoDB Tables
 
 ```
 lambda_functions/
-├── shared/                    # Shared code for both functions
+├── shared/                    # Shared code for all functions
 │   ├── dynamodb_client.py    # DynamoDB operations
 │   └── puzzle_generator.py   # Gemini AI integration
 ├── daily_puzzle_generator/   # Scheduled daily puzzle creation
 │   ├── lambda_function.py
 │   └── requirements.txt
-└── api_handler/              # API endpoints for frontend
+├── api_handler/              # API endpoints for frontend
+│   ├── lambda_function.py
+│   └── requirements.txt
+└── daily_summary_sender/     # Automated daily summary posting
     ├── lambda_function.py
     └── requirements.txt
 
@@ -144,6 +162,7 @@ GEMINI_API_KEY=your-gemini-api-key-here
 DISCORD_CLIENT_ID=your-discord-client-id
 DISCORD_CLIENT_SECRET=your-discord-client-secret
 DISCORD_REDIRECT_URI=https://your-production-url.com
+DISCORD_BOT_TOKEN=your-discord-bot-token
 ```
 
 **Security Note:** Never commit `.env` to git! It's already in `.gitignore`.
@@ -165,11 +184,13 @@ Example: `https://your-function-url.lambda-url.us-east-1.on.aws/daily-puzzle`
 ## Database
 
 DynamoDB tables created automatically:
+
 - `wordwebs-daily-puzzles` - Current day's puzzle
 - `wordwebs-players` - Discord player info
 - `wordwebs-game-sessions` - Game attempts and leaderboard data
 - `wordwebs-historical-puzzles` - Prevent duplicate groups
 - `wordwebs-theme-suggestions` - For future voting feature
+- `wordwebs-discord-channels` - Track Discord channels for daily summaries
 
 ## Development Workflow
 
@@ -180,8 +201,10 @@ DynamoDB tables created automatically:
 ## Features
 
 - **Daily Auto-Generation**: Puzzles created at midnight EST via EventBridge
+- **Automatic Daily Summaries**: Wordle-style daily results posted to Discord channels at 12:05 AM EST
+- **NYT Connections Style**: Tricky word groupings with red herrings and misdirection
 - **Duplicate Prevention**: Checks historical puzzles to avoid repeated groups
-- **Discord Integration**: Player tracking with Discord IDs
+- **Discord Integration**: Player tracking with Discord IDs and bot messaging
 - **Leaderboards**: Daily and all-time statistics
 - **Theme Support**: Ready for community voting system
 - **Always Free**: No ongoing AWS costs within free tier limits
@@ -189,38 +212,39 @@ DynamoDB tables created automatically:
 ## AWS Costs
 
 **Stays within Always Free Tier:**
+
 - Lambda: 1M requests/month free (forever)
 - DynamoDB: 25 GB + 200M requests/month free (forever)
 - Lambda Function URLs: FREE (forever)
 - EventBridge: 14M events/month free (forever)
 
-**Estimated Discord Activity Usage:**
-- 1000 daily players = ~30K Lambda requests/month
-- Puzzle data storage = ~1 MB total
-- Well within all free tier limits!
-
 ## Troubleshooting
 
 **Deploy fails?**
+
 - Check AWS credentials: `aws sts get-caller-identity`
 - Verify function exists: `aws lambda get-function --function-name wordwebs-api-handler`
 
 **Function URL not working?**
+
 - Check CORS configuration in setup script
 - Verify Lambda function has Function URL enabled
 
 **DynamoDB errors?**
+
 - Check IAM permissions include DynamoDB access
 - Verify tables were created: `aws dynamodb list-tables`
 
 ## Advantages Over Previous Architecture
 
 **Before (PostgreSQL + API Gateway):**
+
 - RDS PostgreSQL: $13-15/month after 12 months
 - API Gateway: $1-3.50 per million requests
 - VPC complexity for database access
 
 **Now (DynamoDB + Function URLs):**
+
 - DynamoDB: FREE forever (25GB limit)
 - Function URLs: FREE forever
 - No VPC configuration needed
@@ -231,24 +255,16 @@ DynamoDB tables created automatically:
 Update your Discord Activity frontend to use the Lambda Function URL:
 
 ```javascript
-const API_BASE_URL = 'https://your-function-url.lambda-url.us-east-1.on.aws';
+const API_BASE_URL = "https://your-function-url.lambda-url.us-east-1.on.aws";
 
 // Example API calls
 const puzzle = await fetch(`${API_BASE_URL}/daily-puzzle`);
 const response = await fetch(`${API_BASE_URL}/submit-guess`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ discord_id, guess, puzzle_id })
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ discord_id, guess, puzzle_id }),
 });
 ```
 
 No API keys or authentication needed - the Function URL is public and CORS-enabled.
 
-## Features
-
-- **Daily Auto-Generation**: New puzzles created at midnight EST via EventBridge
-- **NYT Connections Style**: Tricky word groupings with red herrings and misdirection
-- **Duplicate Prevention**: Checks historical puzzles to avoid repeated word groups
-- **Discord Integration**: Player tracking with Discord IDs
-- **Leaderboards**: Daily and all-time statistics
-- **Always Free**: No ongoing AWS costs within free tier limits

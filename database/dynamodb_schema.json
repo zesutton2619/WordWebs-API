@@ -80,6 +80,10 @@
         {
           "AttributeName": "completion_time",
           "AttributeType": "N"
+        },
+        {
+          "AttributeName": "discord_id",
+          "AttributeType": "S"
         }
       ],
       "BillingMode": "PAY_PER_REQUEST",
@@ -93,6 +97,22 @@
             },
             {
               "AttributeName": "completion_time",
+              "KeyType": "RANGE"
+            }
+          ],
+          "Projection": {
+            "ProjectionType": "ALL"
+          }
+        },
+        {
+          "IndexName": "discord-puzzle-index",
+          "KeySchema": [
+            {
+              "AttributeName": "discord_id",
+              "KeyType": "HASH"
+            },
+            {
+              "AttributeName": "puzzle_date",
               "KeyType": "RANGE"
             }
           ],
@@ -113,9 +133,23 @@
           ["WORD1", "WORD2", "WORD3", "WORD4"],
           ["WORD5", "WORD6", "WORD7", "WORD8"]
         ],
+        "game_status": "completed",
+        "attempts_remaining": 0,
+        "solved_groups": [
+          {
+            "words": ["WORD1", "WORD2", "WORD3", "WORD4"],
+            "category": "CATEGORY NAME",
+            "difficulty": 1
+          }
+        ],
+        "selected_words": [],
         "completed": true,
         "completion_time": 120,
-        "created_at": "2025-01-26T12:00:00Z"
+        "discord_message_id": "123456789012345678",
+        "discord_channel_id": "987654321098765432",
+        "message_sent": true,
+        "created_at": "2025-01-26T12:00:00Z",
+        "updated_at": "2025-01-26T12:02:00Z"
       }
     },
     {
@@ -187,6 +221,38 @@
         "status": "pending",
         "votes": 5,
         "created_at": "2025-01-26T12:00:00Z"
+      }
+    },
+    {
+      "TableName": "wordwebs-discord-channels",
+      "KeySchema": [
+        {
+          "AttributeName": "channel_id",
+          "KeyType": "HASH"
+        }
+      ],
+      "AttributeDefinitions": [
+        {
+          "AttributeName": "channel_id",
+          "AttributeType": "S"
+        }
+      ],
+      "BillingMode": "PAY_PER_REQUEST",
+      "GlobalSecondaryIndexes": [],
+      "LocalSecondaryIndexes": [],
+      "Description": "Active Discord channels for daily summary posting",
+      "ExampleItem": {
+        "channel_id": "123456789012345678",
+        "guild_id": "987654321098765432",
+        "guild_name": "My Discord Server",
+        "channel_name": "wordwebs",
+        "is_active": true,
+        "last_activity": "2025-01-26T12:00:00Z",
+        "created_at": "2025-01-26T10:00:00Z",
+        "settings": {
+          "daily_summary_enabled": true,
+          "summary_time": "00:05"
+        }
       }
     }
   ]

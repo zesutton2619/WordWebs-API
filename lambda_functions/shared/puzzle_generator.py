@@ -12,11 +12,27 @@ class PuzzleGenerator:
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
         )
     
-    def generate_puzzle(self, theme: str = None, max_retries: int = 3) -> Dict[str, Any]:
-        """Generate a new puzzle with optional theme"""
+    def get_previous_puzzle_examples(self, db_client) -> List[Dict[str, Any]]:
+        """Get the most recent puzzle's groups to use as examples to avoid"""
+        try:
+            from datetime import datetime, timedelta
+            
+            # Try yesterday first, then day before, etc.
+            for i in range(1, 8):  # Check up to 7 days back
+                date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+                puzzle = db_client.get_daily_puzzle(date)
+                if puzzle and puzzle.get('groups'):
+                    return puzzle['groups']
+            
+            return []
+        except:
+            return []
+    
+    def generate_puzzle(self, theme: str = None, max_retries: int = 3, db_client=None) -> Dict[str, Any]:
+        """Generate a new puzzle with optional theme and dynamic prompt"""
         for attempt in range(max_retries):
             try:
-                puzzle = self._call_gemini_api(theme)
+                puzzle = self._call_gemini_api(theme, db_client)
                 if self._validate_puzzle(puzzle):
                     return self._format_puzzle(puzzle)
             except Exception as e:
@@ -26,28 +42,61 @@ class PuzzleGenerator:
         
         raise Exception("Failed to generate valid puzzle after maximum retries")
     
-    def _call_gemini_api(self, theme: str = None) -> Dict[str, Any]:
-        """Call Gemini API via OpenAI-compatible interface"""
-        theme_prompt = f" related to {theme}" if theme else ""
+    def _call_gemini_api(self, theme: str = None, db_client=None) -> Dict[str, Any]:
+        """Call Gemini API via OpenAI-compatible interface with dynamic prompt"""
+        theme_prompt = f" with a focus on {theme}" if theme else ""
         
-        prompt = f"""Create a word puzzle game like NYT Connections{theme_prompt}. Generate exactly 16 words that form 4 groups of 4 words each.
+        # Get previous puzzle's groups to use as examples to avoid
+        previous_groups = []
+        if db_client:
+            previous_groups = self.get_previous_puzzle_examples(db_client)
+        
+        # Build dynamic avoid section
+        avoid_section = ""
+        if previous_groups:
+            avoid_section = f"""
+CRITICAL - DO NOT REPEAT THESE CATEGORY TYPES FROM THE PREVIOUS PUZZLE:
+"""
+            for group in previous_groups:
+                avoid_section += f"- Difficulty {group['difficulty']}: \"{group['category']}\" (words: {', '.join(group['words'])})\n"
+            
+            avoid_section += """
+You must create COMPLETELY DIFFERENT types of connections for each difficulty level."""
+        
+        prompt = f"""Create a NYT Connections-style word puzzle{theme_prompt}. Generate exactly 16 words that form 4 groups of 4 words each.
 
-Rules:
-- Each group should have a clear connection/category, but make it tricky like NYT Connections
-- Words should be single words only (no phrases, no proper nouns)
-- Difficulty levels: 1 (easiest/most obvious), 2 (medium), 3 (harder), 4 (hardest/most deceptive)
-- Groups should have varied difficulty levels (one of each: 1, 2, 3, 4)
-- IMPORTANT: Include words that could seemingly belong to multiple categories to create red herrings
-- Difficulty 4 should have an unexpected or clever connection that's not immediately obvious
-- Some words should be deliberately misleading - they look like they go with one group but actually belong to another
-- Make players second-guess their choices, especially for harder difficulties
+CRITICAL: You must create MAXIMUM CONFUSION between categories. Players should struggle to figure out which words go together.
 
-Examples of good misdirection:
-- A word that could be both a verb and a noun
-- Words that sound like they belong to an obvious category but actually share a more subtle connection
-- Mix literal and figurative meanings
+DIFFICULTY GUIDELINES:
+- Difficulty 1: Obvious connection that most people see immediately
+- Difficulty 2: Clear connection once you think about it, but not the first thing noticed  
+- Difficulty 3: Requires lateral thinking; connection isn't immediately apparent
+- Difficulty 4: Clever, unexpected connection that makes people say "Oh wow!" when revealed
 
-Return ONLY a valid JSON object in this exact format:
+DIFFICULTY 4 CREATIVITY RULE:
+Create a connection that's clever but not obvious. This could be:
+- Wordplay or linguistic tricks
+- Unexpected shared properties  
+- Hidden patterns or relationships
+- Creative categorization
+BE CREATIVE AND ORIGINAL - don't repeat the same type of difficulty 4 connection!
+
+{avoid_section}
+
+MANDATORY RED HERRING REQUIREMENTS:
+- At least 8 words must reasonably fit into 2+ different categories
+- Create "decoy groups" that seem obvious but are wrong
+- Include words that are near-misses for other categories
+
+AVOID THESE MISTAKES:
+- Don't put obvious categories in high difficulty slots
+- Don't repeat the same type of difficulty 4 connection
+- Difficulty 4 should be clever and surprising, not just obscure
+- Ensure proper difficulty progression from easy to mind-bending
+
+You MUST create confusion and misdirection. Each puzzle should have multiple words that genuinely seem to belong in different categories.
+
+Return ONLY valid JSON in this exact format:
 {{
   "groups": [
     {{"words": ["WORD1", "WORD2", "WORD3", "WORD4"], "category": "CATEGORY NAME", "difficulty": 1}},
@@ -58,12 +107,11 @@ Return ONLY a valid JSON object in this exact format:
 }}"""
 
         response = self.client.chat.completions.create(
-            model="gemini-2.5-flash",
+            model="gemini-2.5-pro",
             messages=[
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            reasoning_effort="none"
+            temperature=0.9,
         )
         
         response_text = response.choices[0].message.content.strip()
@@ -76,7 +124,7 @@ Return ONLY a valid JSON object in this exact format:
         return json.loads(response_text)
     
     def _validate_puzzle(self, puzzle_data: Dict[str, Any]) -> bool:
-        """Validate puzzle structure and content"""
+        """Enhanced validation with quality checks"""
         if "groups" not in puzzle_data:
             return False
         
@@ -86,6 +134,7 @@ Return ONLY a valid JSON object in this exact format:
         
         all_words = []
         difficulties = []
+        categories = []
         
         for group in groups:
             if not all(key in group for key in ["words", "category", "difficulty"]):
@@ -94,13 +143,18 @@ Return ONLY a valid JSON object in this exact format:
             if len(group["words"]) != 4:
                 return False
             
-            # Check for single words (no spaces)
+            # Check for single words (no spaces, hyphens, or proper nouns)
             for word in group["words"]:
-                if " " in word.strip():
+                word_clean = word.strip()
+                if " " in word_clean or "-" in word_clean:
+                    return False
+                # Basic proper noun check (starts with capital and has lowercase)
+                if word_clean[0].isupper() and any(c.islower() for c in word_clean[1:]):
                     return False
             
             all_words.extend([word.upper().strip() for word in group["words"]])
             difficulties.append(group["difficulty"])
+            categories.append(group["category"].strip())
         
         # Check total word count
         if len(all_words) != 16:
@@ -110,8 +164,12 @@ Return ONLY a valid JSON object in this exact format:
         if len(set(all_words)) != 16:
             return False
         
-        # Check difficulty levels are 1-4
-        if not all(1 <= d <= 4 for d in difficulties):
+        # Check difficulty levels are 1-4 and unique
+        if sorted(difficulties) != [1, 2, 3, 4]:
+            return False
+        
+        # Check for duplicate categories
+        if len(set(categories)) != 4:
             return False
         
         return True

@@ -40,7 +40,7 @@ def lambda_handler(event, context):
         max_attempts = 5
         for attempt in range(max_attempts):
             try:
-                puzzle_data = generator.generate_puzzle()
+                puzzle_data = generator.generate_puzzle(db_client=db)
                 
                 # Check for duplicate groups in historical data
                 if not db.check_duplicate_groups(puzzle_data['groups']):

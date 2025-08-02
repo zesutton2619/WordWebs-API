@@ -25,6 +25,12 @@ LAMBDA_FUNCTIONS = {
         'description': 'API handler for WordWebs Discord Activity',
         'timeout': 30,
         'memory': 256
+    },
+    'daily_summary_sender': {
+        'function_name': 'wordwebs-daily-summary-sender',
+        'description': 'Daily summary posting to Discord channels',
+        'timeout': 120,
+        'memory': 256
     }
 }
 

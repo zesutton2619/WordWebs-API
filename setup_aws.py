@@ -14,7 +14,21 @@ from pathlib import Path
 def run_command(cmd, return_json=False):
     """Run AWS CLI command"""
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        # Force use of Windows CMD instead of Git Bash
+        if isinstance(cmd, str):
+            # On Windows, explicitly use cmd.exe to avoid Git Bash conflicts
+            if os.name == 'nt':
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, 
+                                      executable=os.environ.get('SYSTEMROOT', 'C:\\Windows') + '\\System32\\cmd.exe')
+            else:
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        else:
+            if os.name == 'nt':
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                                      executable=os.environ.get('SYSTEMROOT', 'C:\\Windows') + '\\System32\\cmd.exe')
+            else:
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
         if result.returncode != 0:
             print(f"Error: {result.stderr}")
             return None
@@ -29,6 +43,27 @@ def get_account_id():
     """Get AWS account ID"""
     result = run_command('aws sts get-caller-identity', return_json=True)
     return result['Account'] if result else None
+
+def wordwebs_lambda_functions_exist():
+    """Check if WordWebs Lambda functions exist"""
+    try:
+        result = subprocess.run(
+            ['aws', 'lambda', 'list-functions', '--output', 'json'],
+            capture_output=True, text=True
+        )
+        
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            function_names = [f['FunctionName'] for f in data['Functions']]
+            
+            daily_exists = 'wordwebs-daily-puzzle-generator' in function_names
+            api_exists = 'wordwebs-api-handler' in function_names
+            
+            return daily_exists and api_exists
+        return False
+    except Exception as e:
+        print(f"Error checking functions: {e}")
+        return False
 
 def create_lambda_execution_role():
     """Create IAM role for Lambda functions"""
@@ -74,78 +109,46 @@ def create_lambda_execution_role():
             os.remove(trust_policy_file)
 
 def create_dynamodb_tables():
-    """Create DynamoDB tables"""
+    """Create DynamoDB tables from schema file"""
     print("Creating DynamoDB tables...")
     
-    tables = [
-        {
-            'TableName': 'wordwebs-daily-puzzles',
-            'KeySchema': [{'AttributeName': 'puzzle_date', 'KeyType': 'HASH'}],
-            'AttributeDefinitions': [{'AttributeName': 'puzzle_date', 'AttributeType': 'S'}],
-            'BillingMode': 'PAY_PER_REQUEST'
-        },
-        {
-            'TableName': 'wordwebs-players',
-            'KeySchema': [{'AttributeName': 'discord_id', 'KeyType': 'HASH'}],
-            'AttributeDefinitions': [{'AttributeName': 'discord_id', 'AttributeType': 'S'}],
-            'BillingMode': 'PAY_PER_REQUEST'
-        },
-        {
-            'TableName': 'wordwebs-game-sessions',
-            'KeySchema': [{'AttributeName': 'session_id', 'KeyType': 'HASH'}],
-            'AttributeDefinitions': [
-                {'AttributeName': 'session_id', 'AttributeType': 'S'},
-                {'AttributeName': 'puzzle_date', 'AttributeType': 'S'},
-                {'AttributeName': 'completion_time', 'AttributeType': 'N'}
-            ],
-            'BillingMode': 'PAY_PER_REQUEST',
-            'GlobalSecondaryIndexes': [{
-                'IndexName': 'puzzle-date-time-index',
-                'KeySchema': [
-                    {'AttributeName': 'puzzle_date', 'KeyType': 'HASH'},
-                    {'AttributeName': 'completion_time', 'KeyType': 'RANGE'}
-                ],
-                'Projection': {'ProjectionType': 'ALL'}
-            }]
-        },
-        {
-            'TableName': 'wordwebs-historical-puzzles',
-            'KeySchema': [{'AttributeName': 'group_hash', 'KeyType': 'HASH'}],
-            'AttributeDefinitions': [{'AttributeName': 'group_hash', 'AttributeType': 'S'}],
-            'BillingMode': 'PAY_PER_REQUEST'
-        },
-        {
-            'TableName': 'wordwebs-theme-suggestions',
-            'KeySchema': [{'AttributeName': 'theme_id', 'KeyType': 'HASH'}],
-            'AttributeDefinitions': [
-                {'AttributeName': 'theme_id', 'AttributeType': 'S'},
-                {'AttributeName': 'status', 'AttributeType': 'S'}
-            ],
-            'BillingMode': 'PAY_PER_REQUEST',
-            'GlobalSecondaryIndexes': [{
-                'IndexName': 'status-index',
-                'KeySchema': [{'AttributeName': 'status', 'KeyType': 'HASH'}],
-                'Projection': {'ProjectionType': 'ALL'}
-            }]
-        }
-    ]
+    # Load schema from file
+    schema_file = 'database/dynamodb_schema.json'
+    if not os.path.exists(schema_file):
+        print(f"ERROR: Schema file {schema_file} not found")
+        return
+        
+    with open(schema_file, 'r') as f:
+        schema = json.load(f)
+    
+    tables = schema['tables']
     
     for table_config in tables:
         table_name = table_config['TableName']
         
         # Check if table already exists
-        cmd = f'aws dynamodb describe-table --table-name {table_name}'
+        cmd = ['aws', 'dynamodb', 'describe-table', '--table-name', table_name]
         if run_command(cmd):
             print(f"  Table {table_name} already exists")
             continue
         
+        # Remove fields that aren't used in create-table and clean up empty arrays
+        clean_config = {k: v for k, v in table_config.items() 
+                       if k not in ['Description', 'ExampleItem']}
+        
+        # Remove empty arrays that cause AWS errors
+        if 'GlobalSecondaryIndexes' in clean_config and not clean_config['GlobalSecondaryIndexes']:
+            del clean_config['GlobalSecondaryIndexes']
+        if 'LocalSecondaryIndexes' in clean_config and not clean_config['LocalSecondaryIndexes']:
+            del clean_config['LocalSecondaryIndexes']
+        
         # Create table using temp file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(table_config, f)
+            json.dump(clean_config, f)
             table_file = f.name
         
         try:
-            cmd = f'aws dynamodb create-table --cli-input-json file://{table_file}'
+            cmd = ['aws', 'dynamodb', 'create-table', '--cli-input-json', f'file://{table_file}']
             result = run_command(cmd, return_json=True)
             if result:
                 print(f"  Created table: {table_name}")
@@ -182,8 +185,10 @@ def create_lambda_function(name, description, timeout, memory, zip_file, role_ar
         config_file = f.name
     
     try:
-        # Create function
-        cmd = f'aws lambda create-function --cli-input-json file://{config_file} --zip-file fileb://{zip_file}'
+        # Create function with proper Windows path handling
+        config_path = config_file.replace('\\', '/')
+        zip_path = zip_file.replace('\\', '/')
+        cmd = f'aws lambda create-function --cli-input-json file://{config_path} --zip-file fileb://{zip_path}'
         result = run_command(cmd, return_json=True)
         return result
     finally:
@@ -208,9 +213,14 @@ def create_function_url(function_name):
         cors_file = f.name
     
     try:
-        cmd = f'aws lambda create-function-url-config --function-name {function_name} --auth-type NONE --cors file://{cors_file}'
+        cors_path = cors_file.replace('\\', '/')
+        cmd = f'aws lambda create-function-url-config --function-name {function_name} --auth-type NONE --cors file://{cors_path}'
         result = run_command(cmd, return_json=True)
         if result:
+            # Add the critical permission for Function URL access
+            print(f"Adding Function URL permission for: {function_name}")
+            permission_cmd = f'aws lambda add-permission --function-name {function_name} --statement-id FunctionURLAllowPublicAccess --action lambda:invokeFunctionUrl --principal "*" --function-url-auth-type NONE'
+            run_command(permission_cmd)
             return result.get('FunctionUrl')
         return None
     finally:
@@ -219,7 +229,7 @@ def create_function_url(function_name):
 
 def setup_eventbridge_rule(lambda_function_arn):
     """Create EventBridge rule for daily puzzle generation"""
-    print("Creating EventBridge rule...")
+    print("Creating EventBridge rule for daily puzzle generation...")
     
     # Create rule
     cmd = 'aws events put-rule --name wordwebs-daily-puzzle --schedule-expression "cron(0 5 * * ? *)" --description "Generate daily puzzle at midnight EST"'
@@ -242,6 +252,37 @@ def setup_eventbridge_rule(lambda_function_arn):
         
         # Add permission for EventBridge to invoke Lambda
         cmd = f'aws lambda add-permission --function-name wordwebs-daily-puzzle-generator --statement-id allow-eventbridge --action lambda:InvokeFunction --principal events.amazonaws.com --source-arn arn:aws:events:us-east-1:{account_id}:rule/wordwebs-daily-puzzle'
+        run_command(cmd)
+    finally:
+        if os.path.exists(targets_file):
+            os.remove(targets_file)
+
+def setup_daily_summary_eventbridge(lambda_function_arn):
+    """Create EventBridge rule for daily summary posting"""
+    print("Creating EventBridge rule for daily summary posting...")
+    
+    # Create rule - 5 minutes after puzzle generation (12:05 AM EST)
+    cmd = 'aws events put-rule --name wordwebs-daily-summary --schedule-expression "cron(5 5 * * ? *)" --description "Send daily summary at 12:05 AM EST"'
+    run_command(cmd)
+    
+    # Add Lambda target
+    account_id = get_account_id()
+    targets = [{
+        "Id": "1",
+        "Arn": lambda_function_arn
+    }]
+    
+    # Create targets file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        json.dump(targets, f)
+        targets_file = f.name
+    
+    try:
+        cmd = f'aws events put-targets --rule wordwebs-daily-summary --targets file://{targets_file}'
+        run_command(cmd)
+        
+        # Add permission for EventBridge to invoke Lambda
+        cmd = f'aws lambda add-permission --function-name wordwebs-daily-summary-sender --statement-id allow-eventbridge-summary --action lambda:InvokeFunction --principal events.amazonaws.com --source-arn arn:aws:events:us-east-1:{account_id}:rule/wordwebs-daily-summary'
         run_command(cmd)
     finally:
         if os.path.exists(targets_file):
@@ -283,13 +324,23 @@ def main():
     if not env_vars:
         return
     
-    # Check if deployment packages exist
-    daily_puzzle_zip = "lambda_functions/daily_puzzle_generator_deployment.zip"
-    api_handler_zip = "lambda_functions/api_handler_deployment.zip"
-    
-    if not os.path.exists(daily_puzzle_zip) or not os.path.exists(api_handler_zip):
-        print("ERROR: Deployment packages not found. Run 'python deploy.py' first to create them.")
-        return
+    # Check if WordWebs Lambda functions already exist
+    print("Checking for existing WordWebs Lambda functions...")
+    if wordwebs_lambda_functions_exist():
+        print("WordWebs Lambda functions already exist, skipping creation...")
+        lambdas_need_creation = False
+    else:
+        print("WordWebs Lambda functions need to be created...")
+        lambdas_need_creation = True
+        
+        # Check if deployment packages exist when we need to create functions
+        daily_puzzle_zip = "lambda_functions/daily_puzzle_generator_deployment.zip"
+        api_handler_zip = "lambda_functions/api_handler_deployment.zip"
+        daily_summary_zip = "lambda_functions/daily_summary_sender_deployment.zip"
+        
+        if not os.path.exists(daily_puzzle_zip) or not os.path.exists(api_handler_zip) or not os.path.exists(daily_summary_zip):
+            print("ERROR: Deployment packages not found. Run 'python deploy.py' first to create them.")
+            return
     
     # Create IAM role
     role_arn = create_lambda_execution_role()
@@ -304,37 +355,63 @@ def main():
     # Create DynamoDB tables
     create_dynamodb_tables()
     
-    # Prepare environment variables for Lambda
-    daily_env = {
-        "GEMINI_API_KEY": env_vars["GEMINI_API_KEY"]
-    }
-    
-    api_env = {
-        "DISCORD_CLIENT_ID": env_vars["DISCORD_CLIENT_ID"],
-        "DISCORD_CLIENT_SECRET": env_vars["DISCORD_CLIENT_SECRET"],
-        "DISCORD_REDIRECT_URI": env_vars["DISCORD_REDIRECT_URI"]
-    }
-    
-    daily_result = create_lambda_function(
-        "wordwebs-daily-puzzle-generator",
-        "Daily puzzle generation for WordWebs",
-        300, 512, daily_puzzle_zip, role_arn, daily_env
-    )
-    
-    # API handler with Discord OAuth environment variables
-    api_result = create_lambda_function(
-        "wordwebs-api-handler",
-        "API handler for WordWebs Discord Activity", 
-        30, 256, api_handler_zip, role_arn, api_env
-    )
-    
-    if daily_result and api_result:
-        print("Lambda functions created successfully")
+    # Only create Lambda functions if they don't exist
+    if lambdas_need_creation:
+        # Prepare environment variables for Lambda
+        daily_env = {
+            "GEMINI_API_KEY": env_vars["GEMINI_API_KEY"]
+        }
         
-        # Set up EventBridge for daily puzzle generation
+        api_env = {
+            "DISCORD_CLIENT_ID": env_vars["DISCORD_CLIENT_ID"],
+            "DISCORD_CLIENT_SECRET": env_vars["DISCORD_CLIENT_SECRET"],
+            "DISCORD_REDIRECT_URI": env_vars["DISCORD_REDIRECT_URI"],
+            "DISCORD_BOT_TOKEN": env_vars.get("DISCORD_BOT_TOKEN", "")
+        }
+        
+        summary_env = {
+            "DISCORD_BOT_TOKEN": env_vars.get("DISCORD_BOT_TOKEN", ""),
+            "DISCORD_REDIRECT_URI": env_vars["DISCORD_REDIRECT_URI"]
+        }
+        
+        daily_result = create_lambda_function(
+            "wordwebs-daily-puzzle-generator",
+            "Daily puzzle generation for WordWebs",
+            300, 512, daily_puzzle_zip, role_arn, daily_env
+        )
+        
+        # API handler with Discord OAuth environment variables
+        api_result = create_lambda_function(
+            "wordwebs-api-handler",
+            "API handler for WordWebs Discord Activity", 
+            30, 256, api_handler_zip, role_arn, api_env
+        )
+        
+        # Daily summary sender with Discord bot token
+        daily_summary_zip = "lambda_functions/daily_summary_sender_deployment.zip"
+        summary_result = create_lambda_function(
+            "wordwebs-daily-summary-sender",
+            "Daily summary posting to Discord channels",
+            120, 256, daily_summary_zip, role_arn, summary_env
+        )
+    else:
+        print("Skipping Lambda function creation - functions already exist")
+    
+    if lambdas_need_creation and daily_result and api_result and summary_result:
+        print("Lambda functions created successfully")
+    elif not lambdas_need_creation:
+        print("Setup completed - DynamoDB tables recreated, Lambda functions already exist")
+        
+    # Set up EventBridge for daily puzzle generation (only if functions were created)
+    if lambdas_need_creation and daily_result:
         setup_eventbridge_rule(daily_result['FunctionArn'])
         
-        # Create Function URL for API handler
+    # Set up EventBridge for daily summary posting (only if functions were created)
+    if lambdas_need_creation and summary_result:
+        setup_daily_summary_eventbridge(summary_result['FunctionArn'])
+        
+    # Create Function URL for API handler (only if functions were created)
+    if lambdas_need_creation and api_result:
         api_url = create_function_url("wordwebs-api-handler")
         
         print("\nSetup complete!")
