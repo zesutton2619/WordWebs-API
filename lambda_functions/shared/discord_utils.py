@@ -58,7 +58,7 @@ def send_discord_message_with_image(channel_id: str, content: str, image_bytes: 
         headers = {
             'Authorization': f'Bot {bot_token}',
             'Content-Type': f'multipart/form-data; boundary={boundary}',
-            'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI", "https://wordwebs.onrender.com")})'
+            'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})'
         }
         
         req = urllib.request.Request(url, data=full_body, headers=headers)
@@ -98,7 +98,7 @@ def edit_discord_message_with_image(channel_id: str, message_id: str, content: s
         delete_url = f"https://discord.com/api/v10/channels/{channel_id}/messages/{message_id}"
         delete_headers = {
             'Authorization': f'Bot {bot_token}',
-            'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI", "https://wordwebs.onrender.com")})'
+            'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})'
         }
         
         delete_req = urllib.request.Request(delete_url, headers=delete_headers)

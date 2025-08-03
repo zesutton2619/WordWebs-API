@@ -38,8 +38,6 @@ def lambda_handler(event, context):
             return get_daily_puzzle(query_params, event)
         elif http_method == 'GET' and raw_path == '/leaderboard':
             return get_leaderboard(query_params, event)
-        elif http_method == 'GET' and raw_path == '/player-stats':
-            return get_player_stats(query_params, event)
         elif http_method == 'POST' and raw_path == '/discord-oauth/token':
             return exchange_discord_token(body)
         elif http_method == 'POST' and raw_path == '/discord-oauth/refresh':
@@ -58,7 +56,7 @@ def lambda_handler(event, context):
             return create_response(404, {'error': 'Endpoint not found'})
             
     except Exception as e:
-        return create_response(500, {'error': f'Internal server error: {str(e)}'})
+        return create_response(500, {'error': 'Internal server error'})
 
 def create_response(status_code, body, headers=None):
     """Create standardized API response"""
@@ -107,7 +105,7 @@ def get_daily_puzzle(query_params, event):
         return create_response(200, response_data)
         
     except Exception as e:
-        return create_response(500, {'error': f'Failed to get daily puzzle: {str(e)}'})
+        return create_response(500, {'error': 'Failed to retrieve daily puzzle'})
 
 
 def get_leaderboard(query_params, event):
@@ -136,32 +134,8 @@ def get_leaderboard(query_params, event):
         })
         
     except Exception as e:
-        return create_response(500, {'error': f'Failed to get leaderboard: {str(e)}'})
+        return create_response(500, {'error': 'Failed to retrieve leaderboard'})
 
-def get_player_stats(query_params, event):
-    """Get player statistics"""
-    try:
-        # Verify Discord authentication
-        user = verify_discord_user(event)
-        if not user:
-            return create_response(401, {'error': 'Authentication required'})
-        
-        # Use authenticated user's ID or allow querying other users
-        discord_id = query_params.get('discord_id', user['id'])
-        
-        db = DynamoDBClient()
-        stats = db.get_player_stats(discord_id)
-        
-        if not stats:
-            return create_response(404, {'error': 'Player not found'})
-        
-        # Stats are already formatted by DynamoDBClient
-        formatted_stats = stats
-        
-        return create_response(200, formatted_stats)
-        
-    except Exception as e:
-        return create_response(500, {'error': f'Failed to get player stats: {str(e)}'})
 
 def exchange_discord_token(body):
     """Exchange Discord authorization code for access token"""
@@ -194,7 +168,7 @@ def exchange_discord_token(body):
             data=req_data,
             headers={
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'User-Agent': f'WordWebs-Discord-Activity/1.0 ({os.environ.get("DISCORD_REDIRECT_URI", "https://wordwebs.onrender.com")})',
+                'User-Agent': f'WordWebs-Discord-Activity/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})',
                 'Accept': 'application/json',
                 'Accept-Encoding': 'gzip, deflate'
             }
@@ -208,7 +182,7 @@ def exchange_discord_token(body):
                     if response.headers.get('Content-Encoding') == 'gzip':
                         error_body = gzip.decompress(error_body)
                     error_text = error_body.decode('utf-8')
-                    return create_response(400, {'error': f'Discord API error {response.status}: {error_text}'})
+                    return create_response(400, {'error': 'Discord authentication failed'})
                 
                 response_body = response.read()
                 # Handle gzip encoding
@@ -216,17 +190,16 @@ def exchange_discord_token(body):
                     response_body = gzip.decompress(response_body)
                 token_response = json.loads(response_body.decode('utf-8'))
         except urllib.error.HTTPError as e:
-            error_body = e.read().decode('utf-8') if hasattr(e, 'read') else str(e)
-            return create_response(500, {'error': f'Discord API HTTP Error {e.code}: {error_body}'})
+            return create_response(500, {'error': 'Discord authentication service unavailable'})
         except Exception as e:
-            return create_response(500, {'error': f'Request failed: {str(e)}'})
+            return create_response(500, {'error': 'Authentication request failed'})
         
         # Get user info with the access token
         user_req = urllib.request.Request(
             'https://discord.com/api/users/@me',
             headers={
                 'Authorization': f'Bearer {token_response["access_token"]}',
-                'User-Agent': f'WordWebs-Discord-Activity/1.0 ({os.environ.get("DISCORD_REDIRECT_URI", "https://wordwebs.onrender.com")})',
+                'User-Agent': f'WordWebs-Discord-Activity/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})',
                 'Accept': 'application/json'
             }
         )
@@ -239,7 +212,7 @@ def exchange_discord_token(body):
                     if user_response.headers.get('Content-Encoding') == 'gzip':
                         error_body = gzip.decompress(error_body)
                     error_text = error_body.decode('utf-8')
-                    return create_response(400, {'error': f'Failed to get user info: {error_text}'})
+                    return create_response(400, {'error': 'Failed to retrieve user information'})
                 
                 user_body = user_response.read()
                 # Handle gzip encoding
@@ -247,7 +220,7 @@ def exchange_discord_token(body):
                     user_body = gzip.decompress(user_body)
                 user_data = json.loads(user_body.decode('utf-8'))
         except Exception as e:
-            return create_response(500, {'error': f'Failed to get user info: {str(e)}'})
+            return create_response(500, {'error': 'Failed to retrieve user information'})
         
         # Return token and user info
         return create_response(200, {
@@ -263,7 +236,7 @@ def exchange_discord_token(body):
         })
         
     except Exception as e:
-        return create_response(500, {'error': f'Failed to exchange token: {str(e)}'})
+        return create_response(500, {'error': 'Token exchange failed'})
 
 def refresh_discord_token(body):
     """Refresh Discord access token"""
@@ -293,7 +266,7 @@ def refresh_discord_token(body):
             data=req_data,
             headers={
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'User-Agent': f'WordWebs-Discord-Activity/1.0 ({os.environ.get("DISCORD_REDIRECT_URI", "https://wordwebs.onrender.com")})',
+                'User-Agent': f'WordWebs-Discord-Activity/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})',
                 'Accept': 'application/json'
             }
         )
@@ -312,7 +285,7 @@ def refresh_discord_token(body):
         
     except Exception as e:
         print(f"Error refreshing Discord token: {str(e)}")
-        return create_response(500, {'error': f'Failed to refresh token: {str(e)}'})
+        return create_response(500, {'error': 'Token refresh failed'})
 
 def verify_discord_token(query_params):
     """Verify Discord access token and return user info"""
@@ -332,7 +305,7 @@ def verify_discord_token(query_params):
             'https://discord.com/api/users/@me',
             headers={
                 'Authorization': f'Bearer {token}',
-                'User-Agent': f'WordWebs-Discord-Activity/1.0 ({os.environ.get("DISCORD_REDIRECT_URI", "https://wordwebs.onrender.com")})',
+                'User-Agent': f'WordWebs-Discord-Activity/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})',
                 'Accept': 'application/json'
             }
         )
@@ -421,7 +394,7 @@ def get_game_state(query_params, event):
             })
             
     except Exception as e:
-        return create_response(500, {'error': f'Failed to get game state: {str(e)}'})
+        return create_response(500, {'error': 'Failed to retrieve game state'})
 
 def save_game_progress(body, event):
     """Save game progress after each guess"""
@@ -466,7 +439,7 @@ def save_game_progress(body, event):
             print(f"Player retrieved/created: {player['discord_id']}")
         except Exception as e:
             print(f"Error creating/getting player: {str(e)}")
-            return create_response(500, {'error': f'Failed to create player: {str(e)}'})
+            return create_response(500, {'error': 'Failed to create player profile'})
         
         # Check if user has already completed today's puzzle
         try:
@@ -649,7 +622,7 @@ def save_game_progress(body, event):
         print(f"CRITICAL ERROR in save_game_progress: {str(e)}")
         import traceback
         print(f"Full traceback: {traceback.format_exc()}")
-        return create_response(500, {'error': f'Failed to save progress: {str(e)}'})
+        return create_response(500, {'error': 'Failed to save game progress'})
 
 def send_bot_message(body, event):
     """Send Discord bot message with game state image"""
@@ -699,7 +672,7 @@ def send_bot_message(body, event):
             print(f"Image decoded, size: {len(image_bytes)} bytes")
         except Exception as e:
             print(f"Image decoding error: {str(e)}")
-            return create_response(400, {'error': f'Invalid image data: {str(e)}'})
+            return create_response(400, {'error': 'Invalid image data format'})
         
         # Send Discord message with image
         print("Attempting to send Discord message...")
@@ -722,7 +695,7 @@ def send_bot_message(body, event):
         print(f"Exception type: {type(e)}")
         import traceback
         print(f"Traceback: {traceback.format_exc()}")
-        return create_response(500, {'error': f'Failed to send bot message: {str(e)}'})
+        return create_response(500, {'error': 'Failed to send message'})
 
 
 
@@ -817,7 +790,7 @@ def verify_discord_user(event):
             'https://discord.com/api/users/@me',
             headers={
                 'Authorization': f'Bearer {token}',
-                'User-Agent': f'WordWebs-Discord-Activity/1.0 ({os.environ.get("DISCORD_REDIRECT_URI", "https://wordwebs.onrender.com")})',
+                'User-Agent': f'WordWebs-Discord-Activity/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})',
                 'Accept': 'application/json'
             }
         )

@@ -86,14 +86,14 @@ def lambda_handler(event, context):
                 
                 if success:
                     sent_count += 1
-                    print(f"✅ Sent summary to channel {channel_id}")
+                    print(f"Sent summary to channel {channel_id}")
                 else:
                     failed_count += 1
-                    print(f"❌ Failed to send summary to channel {channel_id}")
+                    print(f"Failed to send summary to channel {channel_id}")
                     
             except Exception as e:
                 failed_count += 1
-                print(f"❌ Error sending to channel {channel.get('channel_id', 'unknown')}: {str(e)}")
+                print(f"Error sending to channel {channel.get('channel_id', 'unknown')}: {str(e)}")
         
         return {
             'statusCode': 200,
@@ -134,9 +134,14 @@ def send_discord_summary(channel_id, leaderboard, puzzle_number, date, bot_token
         # Send message via Discord Bot API
         url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
         
+        # Create Activity invite link
+        activity_invite = None
+        if bot_token:
+            activity_invite = create_activity_invite(channel_id, bot_token)
+        
         if summary_image_bytes:
             # Send with image attachment using multipart form data
-            return send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle_number, date, summary_image_bytes)
+            return send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle_number, date, summary_image_bytes, channel_id)
         else:
             # Send text-only message (fallback)
             payload = {
@@ -144,10 +149,22 @@ def send_discord_summary(channel_id, leaderboard, puzzle_number, date, bot_token
                 "embeds": [create_summary_embed(leaderboard, puzzle_number, date)]
             }
             
+            # Add Play Now button if we have an invite link
+            if activity_invite:
+                payload["components"] = [{
+                    "type": 1,  # Action Row
+                    "components": [{
+                        "type": 2,  # Button
+                        "style": 5,  # Link button (external)
+                        "label": "🎮 Play Now",
+                        "url": activity_invite
+                    }]
+                }]
+            
             headers = {
                 'Authorization': f'Bot {bot_token}',
                 'Content-Type': 'application/json',
-                'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI", "https://wordwebs.onrender.com")})'
+                'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})'
             }
             
             req_data = json.dumps(payload).encode('utf-8')
@@ -165,24 +182,41 @@ def send_discord_summary(channel_id, leaderboard, puzzle_number, date, bot_token
         return False
 
 
-def send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle_number, date, image_bytes):
+def send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle_number, date, image_bytes, channel_id=None):
     """
     Send Discord message with image attachment using multipart form data
     """
     import uuid
     
     try:
+        # Create Activity invite link
+        activity_invite = None
+        if channel_id and bot_token:
+            activity_invite = create_activity_invite(channel_id, bot_token)
+        
         # Create multipart boundary
         boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
         
         # Create multipart form data
         form_data = []
         
-        # Add JSON payload
+        # Add JSON payload with action row for Play Now button
         payload = {
             "content": content,
             "embeds": [create_summary_embed(leaderboard, puzzle_number, date)]
         }
+        
+        # Add Play Now button if we have an invite link
+        if activity_invite:
+            payload["components"] = [{
+                "type": 1,  # Action Row
+                "components": [{
+                    "type": 2,  # Button
+                    "style": 5,  # Link button (external)
+                    "label": "🎮 Play Now",
+                    "url": activity_invite
+                }]
+            }]
         
         form_data.append(f'--{boundary}'.encode())
         form_data.append(b'Content-Disposition: form-data; name="payload_json"')
@@ -207,7 +241,7 @@ def send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle
         headers = {
             'Authorization': f'Bot {bot_token}',
             'Content-Type': f'multipart/form-data; boundary={boundary}',
-            'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI", "https://wordwebs.onrender.com")})'
+            'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})'
         }
         
         req = urllib.request.Request(url, data=body, headers=headers)
@@ -228,41 +262,31 @@ def send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle
 
 
 def create_summary_message(games, puzzle_number, date):
-    """Create the main text content for the summary message"""
+    """Create a simplified main text content for the summary message"""
     
-    content = f"📊 **WordWebs #{puzzle_number} Daily Results** 📊\n"
-    content += f"📅 {date}\n\n"
+    content = f"📊 **WordWebs #{puzzle_number} Daily Results**\n"
     
     if len(games) == 0:
-        content += "No one played yesterday's puzzle! 🤔\n"
+        content += "No one played yesterday's puzzle! 🤔"
     else:
         completed_games = [g for g in games if g.get('completed', False)]
         incomplete_games = [g for g in games if not g.get('completed', False)]
         
+        # Mention completed players
         if completed_games:
-            content += f"🎉 **{len(completed_games)} players completed the puzzle!**\n"
-            content += "🏆 **Completed Games:**\n"
-            for i, player in enumerate(completed_games[:3]):
-                medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉"
-                time_str = format_completion_time(player.get('completion_time', 0))
-                content += f"{medal} **{player['display_name']}** - {time_str}\n"
-            
-            if len(completed_games) > 3:
-                content += f"... and {len(completed_games) - 3} others completed it!\n"
+            mentions = [f"<@{player['discord_id']}>" for player in completed_games[:5]]
+            if len(completed_games) > 5:
+                content += f"🎉 {', '.join(mentions)} and {len(completed_games) - 5} others completed the puzzle!"
+            else:
+                content += f"🎉 {', '.join(mentions)} completed the puzzle!"
         
-        if incomplete_games:
-            content += f"\n🎮 **{len(incomplete_games)} players tried but didn't finish:**\n"
-            for i, player in enumerate(incomplete_games[:3]):
-                groups_solved = player.get('solved_groups_count', 0)
-                attempts_used = player.get('attempts_used', 0)
-                content += f"• **{player['display_name']}** - {groups_solved}/4 groups, {attempts_used}/4 attempts\n"
-            
-            if len(incomplete_games) > 3:
-                content += f"... and {len(incomplete_games) - 3} others tried!\n"
-        
-        content += f"\n📈 **Total players:** {len(games)}"
-    
-    content += "\n\n🆕 **Ready for today's new puzzle?** Launch WordWebs to play!"
+        # Mention incomplete players (if no completed ones)
+        elif incomplete_games:
+            mentions = [f"<@{player['discord_id']}>" for player in incomplete_games[:5]]
+            if len(incomplete_games) > 5:
+                content += f"🎮 {', '.join(mentions)} and {len(incomplete_games) - 5} others tried the puzzle!"
+            else:
+                content += f"🎮 {', '.join(mentions)} tried the puzzle!"
     
     return content
 
@@ -273,7 +297,7 @@ def create_summary_embed(games, puzzle_number, date):
     embed = {
         "title": f"WordWebs #{puzzle_number} Results",
         "description": f"Daily summary for {date}",
-        "color": 0x5865F2,  # Discord blurple
+        "color": 0x9333ea,  # Purple to match frontend
         "fields": [],
         "footer": {
             "text": "WordWebs - Daily Word Puzzle Game"
@@ -297,7 +321,7 @@ def create_summary_embed(games, puzzle_number, date):
             fastest_time = format_completion_time(completed_games[0]['completion_time'])
             embed["fields"].append({
                 "name": "⚡ Fastest Completion",
-                "value": f"**{completed_games[0]['display_name']}**\n{fastest_time}",
+                "value": f"<@{completed_games[0]['discord_id']}>\n{fastest_time}",
                 "inline": True
             })
         
@@ -306,7 +330,7 @@ def create_summary_embed(games, puzzle_number, date):
             best_incomplete = max(incomplete_games, key=lambda x: x.get('solved_groups_count', 0))
             embed["fields"].append({
                 "name": "🎯 Best Attempt",
-                "value": f"**{best_incomplete['display_name']}**\n{best_incomplete.get('solved_groups_count', 0)}/4 groups solved",
+                "value": f"<@{best_incomplete['discord_id']}>\n{best_incomplete.get('solved_groups_count', 0)}/4 groups solved",
                 "inline": True
             })
     
@@ -315,8 +339,8 @@ def create_summary_embed(games, puzzle_number, date):
 
 def calculate_puzzle_number(date_str):
     """Calculate puzzle number based on date (days since launch)"""
-    # Set your actual launch date here
-    launch_date = datetime.strptime('2024-01-01', '%Y-%m-%d')
+    # Match frontend launch date (2025-07-30)
+    launch_date = datetime.strptime('2025-07-30', '%Y-%m-%d')
     puzzle_date = datetime.strptime(date_str, '%Y-%m-%d')
     
     diff_days = (puzzle_date - launch_date).days
@@ -409,6 +433,48 @@ def get_discord_avatar_url(discord_id):
                 
     except Exception as e:
         print(f"Error getting Discord avatar for {discord_id}: {str(e)}")
+        return None
+
+
+def create_activity_invite(channel_id, bot_token):
+    """Create an invite link for the Discord Activity"""
+    try:
+        client_id = os.environ.get('DISCORD_CLIENT_ID')
+        if not client_id:
+            print("DISCORD_CLIENT_ID not found in environment")
+            return None
+            
+        # Create invite for Activity
+        url = f"https://discord.com/api/v10/channels/{channel_id}/invites"
+        
+        payload = {
+            "max_age": 86400,  # 24 hours
+            "max_uses": 0,     # Unlimited uses
+            "target_type": 2,  # EMBEDDED_APPLICATION
+            "target_application_id": client_id
+        }
+        
+        headers = {
+            'Authorization': f'Bot {bot_token}',
+            'Content-Type': 'application/json',
+            'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})'
+        }
+        
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+        
+        with urllib.request.urlopen(req) as response:
+            if response.status == 200:
+                invite_data = json.loads(response.read().decode('utf-8'))
+                invite_code = invite_data.get('code')
+                if invite_code:
+                    return f"https://discord.gg/{invite_code}"
+                    
+        print(f"Failed to create invite: {response.status}")
+        return None
+        
+    except Exception as e:
+        print(f"Error creating Activity invite: {str(e)}")
         return None
 
 

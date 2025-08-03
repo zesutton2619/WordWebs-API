@@ -28,8 +28,8 @@ class GameStateImageGenerator:
         }
         
         # Canvas settings (matching gameStateImage.js)
-        self.canvas_width = 500
-        self.canvas_height = 450  # Slightly taller to accommodate avatar
+        self.canvas_width = 250
+        self.canvas_height = 225  # Slightly taller to accommodate avatar
         
     def generate_player_summary_image(
         self,
@@ -55,25 +55,25 @@ class GameStateImageGenerator:
         
         # Try to load fonts (fallback to default if not available)
         try:
-            title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
-            header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18)
-            status_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+            title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+            header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 9)
+            status_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
         except:
             # Fallback to default font
             title_font = ImageFont.load_default()
             header_font = ImageFont.load_default()
             status_font = ImageFont.load_default()
         
-        current_y = 20
+        current_y = 10
         
         # Add Discord avatar if available
-        avatar_size = 50
+        avatar_size = 25
         if player_data.get('avatar_url'):
             try:
                 avatar_img = self._download_and_resize_avatar(player_data['avatar_url'], avatar_size)
                 if avatar_img:
                     # Position avatar in top-left
-                    avatar_x = 20
+                    avatar_x = 10
                     avatar_y = current_y
                     img.paste(avatar_img, (avatar_x, avatar_y))
             except Exception as e:
@@ -81,17 +81,17 @@ class GameStateImageGenerator:
         
         # Add title text (offset if avatar present)
         title_x = self.canvas_width // 2
-        title_y = current_y + 30
+        title_y = current_y + 15
         draw.text((title_x, title_y), f"Word Webs #{puzzle_number}", 
                  fill=self.colors["white"], font=title_font, anchor="mt")
         
         # Add player name
         player_name = player_data.get('display_name', 'Player')
-        name_y = title_y + 35
+        name_y = title_y + 17
         draw.text((title_x, name_y), player_name, 
                  fill=self.colors["light_gray"], font=header_font, anchor="mt")
         
-        current_y = name_y + 35
+        current_y = name_y + 17
         
         # Game state visualization
         solved_groups = player_data.get('solved_groups', [])
@@ -110,7 +110,7 @@ class GameStateImageGenerator:
         
         # Add completion status
         status_text, status_color = self._get_status_text(solved_groups, guesses)
-        status_y = current_y + 25
+        status_y = current_y + 12
         draw.text((self.canvas_width // 2, status_y), status_text,
                  fill=status_color, font=status_font, anchor="mt")
         
@@ -150,12 +150,12 @@ class GameStateImageGenerator:
         if not solved_groups:
             return start_y
             
-        row_height = 45
-        row_padding = 8
+        row_height = 22
+        row_padding = 4
         
         # Calculate grid dimensions (matching gameStateImage.js)
-        grid_size = 40
-        grid_padding = 6
+        grid_size = 20
+        grid_padding = 3
         words_per_row = 4
         grid_width = words_per_row * grid_size + (words_per_row - 1) * grid_padding
         grid_start_x = (self.canvas_width - grid_width) // 2
@@ -170,7 +170,7 @@ class GameStateImageGenerator:
             color = self.colors.get(difficulty, self.colors[1])
             
             # Draw rounded rectangle
-            self._draw_rounded_rect(draw, grid_start_x, current_y, grid_width, row_height, 8, color)
+            self._draw_rounded_rect(draw, grid_start_x, current_y, grid_width, row_height, 4, color)
             current_y += row_height + row_padding
             
         return current_y
@@ -187,8 +187,8 @@ class GameStateImageGenerator:
         current_y = start_y + 2  # Small spacing
         
         # Grid settings (matching gameStateImage.js)
-        grid_size = 40
-        grid_padding = 6
+        grid_size = 20
+        grid_padding = 3
         words_per_row = 4
         grid_start_x = (self.canvas_width - (words_per_row * grid_size + (words_per_row - 1) * grid_padding)) // 2
         
@@ -202,17 +202,17 @@ class GameStateImageGenerator:
             y = current_y + row * (grid_size + grid_padding)
             
             # Draw empty box
-            self._draw_rounded_rect(draw, x, y, grid_size, grid_size, 6, self.colors["empty"])
+            self._draw_rounded_rect(draw, x, y, grid_size, grid_size, 3, self.colors["empty"])
             
             # Add border
-            self._draw_rounded_rect_outline(draw, x, y, grid_size, grid_size, 6, self.colors["border"], 1.5)
+            self._draw_rounded_rect_outline(draw, x, y, grid_size, grid_size, 3, self.colors["border"], 0.75)
         
         return current_y + rows * (grid_size + grid_padding) + 10
     
     def _draw_attempt_dots(self, draw: ImageDraw.Draw, attempts_remaining: int, start_y: int) -> int:
         """Draw attempt dots (matching gameStateImage.js)"""
-        dot_size = 8
-        dot_spacing = 16
+        dot_size = 4
+        dot_spacing = 8
         total_dots = 4
         
         dots_width = (total_dots - 1) * dot_spacing + dot_size
@@ -221,8 +221,6 @@ class GameStateImageGenerator:
         
         for i in range(total_dots):
             dot_x = dots_start_x + i * dot_spacing
-            dot_center_x = dot_x + dot_size // 2
-            dot_center_y = dots_y + dot_size // 2
             
             # White dot for remaining attempts, gray for used
             color = self.colors["white"] if i < attempts_remaining else self.colors["wrong"]
@@ -232,14 +230,14 @@ class GameStateImageGenerator:
                 fill=color
             )
         
-        return dots_y + dot_size + 10
+        return dots_y + dot_size + 5
     
     def _get_status_text(self, solved_groups: List[Dict], guesses: List) -> tuple:
         """Get status text and color (matching gameStateImage.js logic)"""
         if len(solved_groups) == 4:
-            return "🎉 Completed!", "#22c55e"
+            return "Completed!", "#22c55e"
         elif len(guesses) >= 4 and len(solved_groups) < 4:
-            return "💔 Failed", "#ef4444"
+            return "Failed", "#ef4444"
         else:
             return f"{len(solved_groups)}/4 groups found", self.colors["light_gray"]
     
@@ -271,9 +269,9 @@ def generate_combined_summary_image(players_data: List[Dict[str, Any]], puzzle_n
     
     if not players_data:
         # Return empty state image
-        img = Image.new('RGB', (500, 200), generator.colors["background"])
+        img = Image.new('RGB', (250, 100), generator.colors["background"])
         draw = ImageDraw.Draw(img)
-        draw.text((250, 100), "No completed games today", 
+        draw.text((125, 50), "No completed games today", 
                  fill=generator.colors["light_gray"], anchor="mm")
         
         img_bytes = io.BytesIO()
@@ -295,9 +293,9 @@ def generate_combined_summary_image(players_data: List[Dict[str, Any]], puzzle_n
     
     if not player_images:
         # Fallback to text-only image
-        img = Image.new('RGB', (500, 200), generator.colors["background"])
+        img = Image.new('RGB', (250, 100), generator.colors["background"])
         draw = ImageDraw.Draw(img)
-        draw.text((250, 100), f"Word Webs #{puzzle_number} - {len(players_data)} players completed", 
+        draw.text((125, 50), f"Word Webs #{puzzle_number} - {len(players_data)} players completed", 
                  fill=generator.colors["white"], anchor="mm")
         
         img_bytes = io.BytesIO()

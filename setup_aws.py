@@ -96,11 +96,54 @@ def create_lambda_execution_role():
         cmd = 'aws iam attach-role-policy --role-name wordwebs-lambda-execution-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
         run_command(cmd)
         
-        # Attach DynamoDB execution policy
-        cmd = 'aws iam attach-role-policy --role-name wordwebs-lambda-execution-role --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
-        run_command(cmd)
-        
+        # Create custom DynamoDB policy for WordWebs tables only
         account_id = get_account_id()
+        dynamodb_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Action": [
+                        "dynamodb:GetItem",
+                        "dynamodb:PutItem",
+                        "dynamodb:UpdateItem",
+                        "dynamodb:DeleteItem",
+                        "dynamodb:Query",
+                        "dynamodb:Scan",
+                        "dynamodb:BatchGetItem",
+                        "dynamodb:BatchWriteItem"
+                    ],
+                    "Resource": [
+                        f"arn:aws:dynamodb:us-east-1:{account_id}:table/wordwebs-*",
+                        f"arn:aws:dynamodb:us-east-1:{account_id}:table/wordwebs-*/index/*"
+                    ]
+                }
+            ]
+        }
+        
+        # Create policy file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(dynamodb_policy, f)
+            policy_file = f.name
+        
+        try:
+            # Create the custom policy
+            cmd = f'aws iam create-policy --policy-name WordWebsDynamoDBPolicy --policy-document file://{policy_file} --description "DynamoDB access for WordWebs tables only"'
+            run_command(cmd)
+            
+            # Attach the custom policy
+            cmd = f'aws iam attach-role-policy --role-name wordwebs-lambda-execution-role --policy-arn arn:aws:iam::{account_id}:policy/WordWebsDynamoDBPolicy'
+            run_command(cmd)
+            
+        except Exception as e:
+            # Policy might already exist, try to attach it
+            print(f"Policy creation failed (may already exist): {str(e)}")
+            cmd = f'aws iam attach-role-policy --role-name wordwebs-lambda-execution-role --policy-arn arn:aws:iam::{account_id}:policy/WordWebsDynamoDBPolicy'
+            run_command(cmd)
+        finally:
+            if os.path.exists(policy_file):
+                os.remove(policy_file)
+        
         return f"arn:aws:iam::{account_id}:role/wordwebs-lambda-execution-role"
         
     finally:
@@ -199,12 +242,32 @@ def create_function_url(function_name):
     """Create Lambda Function URL"""
     print(f"Creating Function URL for: {function_name}")
     
+    # Get environment variables for CORS origins
+    env_vars = load_env_vars()
+    redirect_uri = env_vars.get("DISCORD_REDIRECT_URI", "")
+    
+    cors_origins = [
+        "https://discord.com",
+        "https://*.discord.com"
+    ]
+    
+    # Add redirect URI if it exists
+    if redirect_uri:
+        cors_origins.append(redirect_uri)
+    
+    # Add cloudflare tunnel pattern for local development
+    cors_origins.extend([
+        "https://*.trycloudflare.com",  # Cloudflare tunnel domains
+        "http://localhost:5173",        # Local Vite dev (fallback)
+        "https://localhost:5173"        # Local Vite HTTPS (fallback)
+    ])
+    
     cors_config = {
         "AllowCredentials": False,
-        "AllowHeaders": ["*"],
-        "AllowMethods": ["*"],
-        "AllowOrigins": ["*"],
-        "ExposeHeaders": ["*"],
+        "AllowHeaders": ["Content-Type", "Authorization", "X-Requested-With"],
+        "AllowMethods": ["GET", "POST", "OPTIONS"],
+        "AllowOrigins": cors_origins,
+        "ExposeHeaders": ["Content-Length"],
         "MaxAge": 86400
     }
     
@@ -371,7 +434,8 @@ def main():
         
         summary_env = {
             "DISCORD_BOT_TOKEN": env_vars.get("DISCORD_BOT_TOKEN", ""),
-            "DISCORD_REDIRECT_URI": env_vars["DISCORD_REDIRECT_URI"]
+            "DISCORD_REDIRECT_URI": env_vars["DISCORD_REDIRECT_URI"],
+            "DISCORD_CLIENT_ID": env_vars["DISCORD_CLIENT_ID"]
         }
         
         daily_result = create_lambda_function(
