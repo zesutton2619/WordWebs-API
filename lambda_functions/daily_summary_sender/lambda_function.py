@@ -77,6 +77,7 @@ def lambda_handler(event, context):
                 
                 success = send_discord_summary(
                     channel_id=channel_id,
+                    guild_id=channel.get('guild_id'),
                     leaderboard=channel_games,
                     puzzle_number=puzzle_number,
                     date=yesterday_str,
@@ -116,7 +117,7 @@ def lambda_handler(event, context):
         }
 
 
-def send_discord_summary(channel_id, leaderboard, puzzle_number, date, bot_token=None, summary_image_bytes=None):
+def send_discord_summary(channel_id, guild_id, leaderboard, puzzle_number, date, bot_token=None, summary_image_bytes=None):
     """
     Send summary message to Discord channel using bot token with optional image
     """
@@ -141,25 +142,13 @@ def send_discord_summary(channel_id, leaderboard, puzzle_number, date, bot_token
         
         if summary_image_bytes:
             # Send with image attachment using multipart form data
-            return send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle_number, date, summary_image_bytes, channel_id)
+            message_id = send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle_number, date, summary_image_bytes, channel_id, guild_id)
         else:
             # Send text-only message (fallback)
             payload = {
                 "content": content,
                 "embeds": [create_summary_embed(leaderboard, puzzle_number, date)]
             }
-            
-            # Add Play Now button if we have an invite link
-            if activity_invite:
-                payload["components"] = [{
-                    "type": 1,  # Action Row
-                    "components": [{
-                        "type": 2,  # Button
-                        "style": 5,  # Link button (external)
-                        "label": "🎮 Play Now",
-                        "url": activity_invite
-                    }]
-                }]
             
             headers = {
                 'Authorization': f'Bot {bot_token}',
@@ -172,17 +161,24 @@ def send_discord_summary(channel_id, leaderboard, puzzle_number, date, bot_token
             
             with urllib.request.urlopen(req) as response:
                 if response.status == 200 or response.status == 201:
-                    return True
+                    response_data = json.loads(response.read().decode('utf-8'))
+                    message_id = response_data.get('id')
                 else:
                     print(f"Discord API returned status {response.status}")
-                    return False
+                    message_id = None
+        
+        # If we got a message ID and activity invite, edit the message to add the Play Now button
+        if message_id and activity_invite:
+            return edit_message_with_play_button(channel_id, message_id, bot_token, content, leaderboard, puzzle_number, date, activity_invite)
+        
+        return message_id is not None
                 
     except Exception as e:
         print(f"Error sending Discord message: {str(e)}")
         return False
 
 
-def send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle_number, date, image_bytes, channel_id=None):
+def send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle_number, date, image_bytes, channel_id=None, guild_id=None):
     """
     Send Discord message with image attachment using multipart form data
     """
@@ -191,7 +187,7 @@ def send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle
     try:
         # Create Activity invite link
         activity_invite = None
-        if channel_id and bot_token:
+        if bot_token:
             activity_invite = create_activity_invite(channel_id, bot_token)
         
         # Create multipart boundary
@@ -206,17 +202,7 @@ def send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle
             "embeds": [create_summary_embed(leaderboard, puzzle_number, date)]
         }
         
-        # Add Play Now button if we have an invite link
-        if activity_invite:
-            payload["components"] = [{
-                "type": 1,  # Action Row
-                "components": [{
-                    "type": 2,  # Button
-                    "style": 5,  # Link button (external)
-                    "label": "🎮 Play Now",
-                    "url": activity_invite
-                }]
-            }]
+        # Don't add Play Now button initially - we'll add it in the edit step
         
         form_data.append(f'--{boundary}'.encode())
         form_data.append(b'Content-Disposition: form-data; name="payload_json"')
@@ -248,17 +234,109 @@ def send_discord_message_with_image(url, bot_token, content, leaderboard, puzzle
         
         with urllib.request.urlopen(req) as response:
             if response.status == 200 or response.status == 201:
-                print("Successfully sent Discord message with image")
-                return True
+                response_data = json.loads(response.read().decode('utf-8'))
+                message_id = response_data.get('id')
+                print(f"Successfully sent Discord message with image, message ID: {message_id}")
+                return message_id
             else:
                 print(f"Discord API returned status {response.status}")
+                response_body = response.read().decode('utf-8')
+                print(f"Response body: {response_body}")
+                return None
+                
+    except Exception as e:
+        print(f"Error sending Discord message with image: {str(e)}")
+        return None
+
+
+def edit_message_with_play_button(channel_id, message_id, bot_token, content, leaderboard, puzzle_number, date, activity_invite):
+    """
+    Edit the Discord message to add the Play Now button with the correct message link
+    """
+    try:
+        url = f"https://discord.com/api/v10/channels/{channel_id}/messages/{message_id}"
+        
+        payload = {
+            "content": content,
+            "embeds": [create_summary_embed(leaderboard, puzzle_number, date)],
+            "components": [{
+                "type": 1,  # Action Row
+                "components": [{
+                    "type": 2,  # Button
+                    "style": 5,  # Link button (external)
+                    "label": "🎮 Play Now",
+                    "url": activity_invite
+                }]
+            }]
+        }
+        
+        headers = {
+            'Authorization': f'Bot {bot_token}',
+            'Content-Type': 'application/json',
+            'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})'
+        }
+        
+        req_data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(url, data=req_data, headers=headers, method='PATCH')
+        
+        with urllib.request.urlopen(req) as response:
+            if response.status == 200:
+                print(f"Successfully edited message {message_id} with Play Now button")
+                return True
+            else:
+                print(f"Failed to edit message: {response.status}")
                 response_body = response.read().decode('utf-8')
                 print(f"Response body: {response_body}")
                 return False
                 
     except Exception as e:
-        print(f"Error sending Discord message with image: {str(e)}")
+        print(f"Error editing Discord message: {str(e)}")
         return False
+
+
+def create_activity_invite(channel_id, bot_token):
+    """Create an invite link for the Discord Activity"""
+    try:
+        client_id = os.environ.get('DISCORD_CLIENT_ID')
+        if not client_id:
+            print("DISCORD_CLIENT_ID not found in environment")
+            return None
+            
+        # Create invite for Activity
+        url = f"https://discord.com/api/v10/channels/{channel_id}/invites"
+        
+        payload = {
+            "max_age": 86400,  # 24 hours
+            "max_uses": 0,     # Unlimited uses
+            "target_type": 2,  # EMBEDDED_APPLICATION
+            "target_application_id": client_id
+        }
+        
+        headers = {
+            'Authorization': f'Bot {bot_token}',
+            'Content-Type': 'application/json',
+            'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})'
+        }
+        
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+        
+        with urllib.request.urlopen(req) as response:
+            if response.status == 200:
+                invite_data = json.loads(response.read().decode('utf-8'))
+                invite_code = invite_data.get('code')
+                if invite_code:
+                    print(f"Created Activity invite: https://discord.gg/{invite_code}")
+                    return f"https://discord.gg/{invite_code}"
+                    
+        print(f"Failed to create invite: {response.status}")
+        response_body = response.read().decode('utf-8')
+        print(f"Response body: {response_body}")
+        return None
+        
+    except Exception as e:
+        print(f"Error creating Activity invite: {str(e)}")
+        return None
 
 
 def create_summary_message(games, puzzle_number, date):
@@ -436,46 +514,6 @@ def get_discord_avatar_url(discord_id):
         return None
 
 
-def create_activity_invite(channel_id, bot_token):
-    """Create an invite link for the Discord Activity"""
-    try:
-        client_id = os.environ.get('DISCORD_CLIENT_ID')
-        if not client_id:
-            print("DISCORD_CLIENT_ID not found in environment")
-            return None
-            
-        # Create invite for Activity
-        url = f"https://discord.com/api/v10/channels/{channel_id}/invites"
-        
-        payload = {
-            "max_age": 86400,  # 24 hours
-            "max_uses": 0,     # Unlimited uses
-            "target_type": 2,  # EMBEDDED_APPLICATION
-            "target_application_id": client_id
-        }
-        
-        headers = {
-            'Authorization': f'Bot {bot_token}',
-            'Content-Type': 'application/json',
-            'User-Agent': f'WordWebs-Bot/1.0 ({os.environ.get("DISCORD_REDIRECT_URI")})'
-        }
-        
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(url, data=data, headers=headers, method='POST')
-        
-        with urllib.request.urlopen(req) as response:
-            if response.status == 200:
-                invite_data = json.loads(response.read().decode('utf-8'))
-                invite_code = invite_data.get('code')
-                if invite_code:
-                    return f"https://discord.gg/{invite_code}"
-                    
-        print(f"Failed to create invite: {response.status}")
-        return None
-        
-    except Exception as e:
-        print(f"Error creating Activity invite: {str(e)}")
-        return None
 
 
 def format_completion_time(seconds):
